@@ -1,1 +1,83 @@
+import chess
+import random
+import math
 
+class MCTSNode:
+    def __init__(self, board, parent=None, move=None):
+        self.board = board
+        self.parent = parent
+        self.move = move
+        self.children = []
+        self.visits = 0
+        self.wins = 0
+
+    def select(self, c=1.4):
+        best_score = float('-inf')
+        best_child = None
+
+        for child in self.children:
+            if child.visits == 0:
+                continue
+
+            score = child.wins / child.visits + c * math.sqrt(math.log(self.visits) / child.visits)
+            if score > best_score:
+                best_score = score
+                best_child = child
+
+        return best_child
+
+    def expand(self):
+        for move in self.board.legal_moves:
+            child_board = self.board.copy()
+            child_board.push(move)
+            self.children.append(MCTSNode(child_board, self, move))
+
+    def backpropagate(self, result):
+        self.visits += 1
+        self.wins += result
+        if self.parent:
+            self.parent.backpropagate(1 - result)
+
+    def rollout(self):
+        rollout_board = self.board.copy()
+        while not rollout_board.is_game_over():
+            rollout_board.push(random.choice(list(rollout_board.legal_moves)))
+        result = int(rollout_board.turn == chess.WHITE)
+        self.backpropagate(result)
+
+def mcts(root, iterations=1000):
+    for _ in range(iterations):
+        node = root
+
+        while node.children:
+            node = node.select()
+
+        if not node.board.is_game_over():
+            node.expand()
+            if node.children:
+                node = random.choice(node.children)
+
+        node.rollout()
+
+    return max(root.children, key=lambda child: child.visits).move
+
+def self_play(max_moves=100, mcts_iterations=1000):
+    board = chess.Board()
+    move_count = 0
+
+    while not board.is_game_over() and move_count < max_moves:
+        best_move = mcts(MCTSNode(board), mcts_iterations)
+        if best_move is None:
+            break
+
+        board.push(best_move)
+        move_count += 1
+        print(f"Move {move_count}: {best_move}")
+
+        print(board)
+
+    print("\nGame Over!")
+    print(f"Result: {board.result()}")
+
+if __name__ == "__main__":
+    self_play()
