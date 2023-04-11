@@ -1,83 +1,117 @@
 import chess
+import chess.svg
 import random
-import math
+import pickle
 
 class MCTSNode:
-    def __init__(self, board, parent=None, move=None):
-        self.board = board
+    def __init__(self, board, parent=None):
+        self.board = board.copy()
         self.parent = parent
-        self.move = move
         self.children = []
-        self.visits = 0
         self.wins = 0
+        self.visits = 0
 
-    def select(self, c=1.4):
-        best_score = float('-inf')
-        best_child = None
+    def add_child(self, child):
+        self.children.append(child)
 
-        for child in self.children:
-            if child.visits == 0:
-                continue
+    def select(self, c=1):
+        return max(self.children, key=lambda child: child.wins / (child.visits + 1e-6) + c * ((2 * self.visits)**0.5 / (child.visits + 1e-6)))
+    
+def random_rollout_policy(board):
+    legal_moves = list(board.legal_moves)
+    return random.choice(legal_moves) if legal_moves else None
 
-            score = child.wins / child.visits + c * math.sqrt(math.log(self.visits) / child.visits)
-            if score > best_score:
-                best_score = score
-                best_child = child
-
-        return best_child
-
-    def expand(self):
-        for move in self.board.legal_moves:
-            child_board = self.board.copy()
-            child_board.push(move)
-            self.children.append(MCTSNode(child_board, self, move))
-
-    def backpropagate(self, result):
-        self.visits += 1
-        self.wins += result
-        if self.parent:
-            self.parent.backpropagate(1 - result)
-
-    def rollout(self):
-        rollout_board = self.board.copy()
-        while not rollout_board.is_game_over():
-            rollout_board.push(random.choice(list(rollout_board.legal_moves)))
-        result = int(rollout_board.turn == chess.WHITE)
-        self.backpropagate(result)
-
-def mcts(root, iterations=1000):
-    for _ in range(iterations):
-        node = root
-
-        while node.children:
-            node = node.select()
-
-        if not node.board.is_game_over():
-            node.expand()
-            if node.children:
-                node = random.choice(node.children)
-
-        node.rollout()
-
-    return max(root.children, key=lambda child: child.visits).move
-
-def self_play(max_moves=100, mcts_iterations=1000):
-    board = chess.Board()
-    move_count = 0
-
-    while not board.is_game_over() and move_count < max_moves:
-        best_move = mcts(MCTSNode(board), mcts_iterations)
-        if best_move is None:
+def rollout(board):
+    temp_board = board.copy()
+    while not temp_board.is_game_over():
+        move = random_rollout_policy(temp_board)
+        if move is None:
             break
+        temp_board.push(move)
+    result = temp_board.result()
+    if result == "1-0":
+        return 1
+    elif result == "0-1":
+        return -1
+    else:
+        return 0
 
-        board.push(best_move)
+
+def mcts(node, n_simulations=100):
+    for _ in range(n_simulations):
+        node_to_expand = node
+        while not node_to_expand.board.is_game_over() and node_to_expand.children:
+            node_to_expand = node_to_expand.select()
+        if not node_to_expand.board.is_game_over():
+            for move in node_to_expand.board.legal_moves:
+                new_board = node_to_expand.board.copy()
+                new_board.push(move)
+                child_node = MCTSNode(new_board, parent=node_to_expand)
+                node_to_expand.add_child(child_node)
+        if node_to_expand.children:
+            leaf_node = random.choice(node_to_expand.children)
+            rollout_result = rollout(leaf_node.board)
+            while leaf_node is not None:
+                leaf_node.visits += 1
+                leaf_node.wins += rollout_result
+                leaf_node = leaf_node.parent
+    return node.select(c=0)
+
+
+def save_checkpoint(node, filepath):
+    with open(filepath, "wb") as f:
+        pickle.dump(node, f)
+
+def load_checkpoint(filepath):
+    with open(filepath, "rb") as f:
+        return pickle.load(f)
+
+def display_board(board):
+    return chess.svg.board(board=board, size=400)
+
+def play_game(mcts_node, checkpoint_file, move_limit=100):
+    move_count = 0
+    while not mcts_node.board.is_game_over() and move_count < move_limit:
+        move = mcts(mcts_node).board.peek()
+        mcts_node.board.push(move)
+        print(display_board(mcts_node.board))
+        print("\n")
+        save_checkpoint(mcts_node, checkpoint_file)
         move_count += 1
-        print(f"Move {move_count}: {best_move}")
 
-        print(board)
+checkpoint_file = "mcts_checkpoint.pkl"
+initial_board = chess.Board()
 
-    print("\nGame Over!")
-    print(f"Result: {board.result()}")
+try:
+    mcts_root = load_checkpoint(checkpoint_file)
+    print("Loaded checkpoint")
+except FileNotFoundError:
+    mcts_root = MCTSNode(initial_board)
+    print("Starting new game")
 
-if __name__ == "__main__":
-    self_play()
+def play_game(mcts_node, checkpoint_file, move_limit=100):
+    move_count = 0
+    while not mcts_node.board.is_game_over() and move_count < move_limit:
+        selected_node = mcts(mcts_node)
+        parent_board = mcts_node.board.copy()
+        child_board = selected_node.board.copy()
+        
+        move = None
+        for parent_move in parent_board.legal_moves:
+            temp_board = parent_board.copy()
+            temp_board.push(parent_move)
+            if temp_board == child_board:
+                move = parent_move
+                break
+        
+        if move:
+            mcts_node.board.push(move)
+            print(display_board(mcts_node.board))
+            print("\n")
+            save_checkpoint(mcts_node, checkpoint_file)
+            move_count += 1
+
+
+
+# Call the play_game function to start the game
+play_game(mcts_root, checkpoint_file)
