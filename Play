@@ -1,0 +1,126 @@
+import chess
+import random
+import math
+import os
+import pickle
+
+def load_checkpoint(checkpoint):
+    if not os.path.exists(checkpoint):
+        return None
+
+    with open(checkpoint, "rb") as file:
+        board_state = pickle.load(file)
+    return board_state
+
+def save_checkpoint(board, filename):
+    with open(filename, "wb") as file:
+        pickle.dump(board, file)
+
+
+class MCTSNode:
+    def __init__(self, board, parent=None, move=None):
+        self.board = board
+        self.parent = parent
+        self.move = move
+        self.children = []
+        self.visits = 0
+        self.wins = 0
+
+    def select(self, c=1.4):
+        best_score = float('-inf')
+        best_child = None
+
+        for child in self.children:
+            if child.visits == 0:
+                continue
+
+            score = child.wins / child.visits + c * math.sqrt(math.log(self.visits) / child.visits)
+            if score > best_score:
+                best_score = score
+                best_child = child
+
+        return best_child
+
+    def expand(self):
+        for move in self.board.legal_moves:
+            child_board = self.board.copy()
+            child_board.push(move)
+            self.children.append(MCTSNode(child_board, self, move))
+
+    def backpropagate(self, result):
+        self.visits += 1
+        self.wins += result
+        if self.parent:
+            self.parent.backpropagate(1 - result)
+
+    def rollout(self):
+        rollout_board = self.board.copy()
+        while not rollout_board.is_game_over():
+            rollout_board.push(random.choice(list(rollout_board.legal_moves)))
+        result = int(rollout_board.turn == chess.WHITE)
+        self.backpropagate(result)
+
+def mcts(root, iterations=1000):
+    for _ in range(iterations):
+        node = root
+
+        while node.children:
+            node = node.select()
+
+        if not node.board.is_game_over():
+            node.expand()
+            if node.children:
+                node = random.choice(node.children)
+
+        node.rollout()
+
+    return max(root.children, key=lambda child: child.visits).move
+
+def human_vs_ai(max_moves=1000, mcts_iterations=1000, checkpoint_file=None):
+    if checkpoint_file:
+        board_state = load_checkpoint(checkpoint_file)
+        if board_state:
+            board = chess.Board(board_state)
+        else:
+            board = chess.Board()
+    else:
+        board = chess.Board()
+
+    move_count = 0
+
+    while not board.is_game_over() and move_count < max_moves:
+        print(board)
+
+        if board.turn == chess.WHITE:
+            # Human plays as white
+            move_str = input("Enter your move (e.g. e2e4): ").strip()
+            try:
+                move = chess.Move.from_uci(move_str)
+                if move in board.legal_moves:
+                    board.push(move)
+                else:
+                    print("Illegal move. Please try again.")
+                    continue
+            except ValueError:
+                print("Invalid move format. Please try again.")
+                continue
+        else:
+            # AI plays as black
+            best_move = mcts(MCTSNode(board), mcts_iterations)
+            if best_move is None:
+                break
+
+            board.push(best_move)
+            print(f"AI move: {best_move}")
+
+        move_count += 1
+
+        # Save the current state of the board to the checkpoint file
+        if checkpoint_file:
+            save_checkpoint(board.fen(), checkpoint_file)
+
+    print("\nGame Over!")
+    print(f"Result: {board.result()}")
+
+if __name__ == "__main__":
+    human_vs_ai(checkpoint_file="checkpoint.pkl")
