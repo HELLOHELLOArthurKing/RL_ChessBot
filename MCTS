@@ -1,6 +1,21 @@
 import chess
 import random
 import math
+import os
+import pickle
+
+def load_checkpoint(checkpoint):
+    if not os.path.exists(checkpoint):
+        return None
+
+    with open(checkpoint, "rb") as file:
+        board_state = pickle.load(file)
+    return board_state
+
+def save_checkpoint(board, filename):
+    with open(filename, "wb") as file:
+        pickle.dump(board, file)
+
 
 class MCTSNode:
     def __init__(self, board, parent=None, move=None):
@@ -61,8 +76,16 @@ def mcts(root, iterations=1000):
 
     return max(root.children, key=lambda child: child.visits).move
 
-def self_play(max_moves=1000, mcts_iterations=1000):
-    board = chess.Board()
+def self_play(max_moves=1000, mcts_iterations=1000, checkpoint_file=None):
+    if checkpoint_file:
+        board_state = load_checkpoint(checkpoint_file)
+        if board_state:
+            board = chess.Board(board_state)
+        else:
+            board = chess.Board()
+    else:
+        board = chess.Board()
+
     move_count = 0
 
     while not board.is_game_over() and move_count < max_moves:
@@ -76,9 +99,12 @@ def self_play(max_moves=1000, mcts_iterations=1000):
 
         print(board)
 
+        # Save the current state of the board to the checkpoint file
+        if checkpoint_file:
+            save_checkpoint(board.fen(), checkpoint_file)
+
     print("\nGame Over!")
     print(f"Result: {board.result()}")
 
 if __name__ == "__main__":
-    self_play()
-
+    self_play(checkpoint_file="checkpoint.pkl")
